@@ -1,0 +1,14 @@
+Merge constraints
+=================
+
+Compare the [AffineConstraints::make_consistent_in_parallel()](https://dealii.org/developer/doxygen/deal.II/classAffineConstraints.html#ab0217a83250614a473e29096d9a7f515) implementations within the hp-context: The old version with the new one introduced in [#14905](https://github.com/dealii/dealii/pull/14905).
+
+Setup
+=====
+
+You need to work on this [deal.II branch](https://github.com/marcfehling/dealii/tree/old-and-new-consistency).
+
+Configure this project as an in-source build as follows:
+
+    cmake -DDEAL_II_DIR=/path/to/dealii .
+    make
