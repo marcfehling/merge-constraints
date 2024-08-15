@@ -11,6 +11,7 @@
 //
 // ---------------------------------------------------------------------
 
+#include <deal.II/base/conditional_ostream.h>
 #include <deal.II/base/index_set.h>
 
 #include <deal.II/distributed/tria.h>
@@ -49,59 +50,42 @@ private:
 
   AffineConstraints<double> constraints;
   AffineConstraints<double> constraints_OLDSTYLE;
+
+  ConditionalOStream pcout;
 };
 
 template <int dim, int spacedim>
 Problem<dim, spacedim>::Problem()
   : triangulation(MPI_COMM_WORLD)
   , dof_handler(triangulation)
+  , pcout(std::cout,
+          Utilities::MPI::this_mpi_process(triangulation.get_communicator()) ==
+            0)
 {}
 
 template <int dim, int spacedim>
 void
 Problem<dim, spacedim>::run()
 {
-  // setup grid
-  // two-coarse-cells
-  std::vector<unsigned int> repetitions(dim);
-  Point<dim>                bottom_left, top_right;
-  for (unsigned int d = 0; d < dim; ++d)
-    if (d < 1)
-      {
-        repetitions[d] = 2;
-        bottom_left[d] = 0.;
-        top_right[d]   = 2.;
-      }
-    else
-      {
-        repetitions[d] = 1;
-        bottom_left[d] = 0.;
-        top_right[d]   = 1.;
-      }
+  pcout << "Setup grid." << std::endl;
 
-  GridGenerator::subdivided_hyper_rectangle(triangulation,
-                                            repetitions,
-                                            bottom_left,
-                                            top_right);
+  // coarse mesh
+  // Stokes Y-Pipe geometry
+  const std::vector<std::pair<Point<spacedim>, double>> openings = {
+    {{{-2., 0., 0.}, 1.},
+     {{1., 1. * std::sqrt(3.), 0.}, 1.},
+     {{1., -1. * std::sqrt(3.), 0.}, 1.}}};
 
-  // hp-refine
-  for (const auto &cell : dof_handler.active_cell_iterators() |
-                            IteratorFilters::LocallyOwnedCell())
-    {
-      // set all cells to second to last FE
-      cell->set_active_fe_index(0);
+  const std::pair<Point<spacedim>, double> bifurcation = {{0., 0., 0.}, 1.};
 
-      if (std::abs(cell->center()[0]) < 1)
-        // left cell gets p-refined
-        cell->set_active_fe_index(1);
-      else
-        // right cell gets h-refined
-        cell->set_refine_flag();
-    }
-  triangulation.execute_coarsening_and_refinement();
+  GridGenerator::pipe_junction(triangulation, openings, bifurcation);
 
-  // setup dofs
-  for (unsigned int degree = 1; degree <= 2; ++degree)
+  // load checkpoint
+  triangulation.load("stokes_mg-asm_weights.cycle-07.checkpoint");
+  dof_handler.deserialize_active_fe_indices();
+
+  // set dofs
+  for (unsigned int degree = 1; degree <= 10; ++degree)
     fe_collection.push_back(FE_Q<dim>(degree));
   dof_handler.distribute_dofs(fe_collection);
 
@@ -109,12 +93,16 @@ Problem<dim, spacedim>::run()
   locally_active_dofs   = DoFTools::extract_locally_active_dofs(dof_handler);
   locally_relevant_dofs = DoFTools::extract_locally_relevant_dofs(dof_handler);
 
-  // make hanging node constraints
+
+  pcout << "Make hanging node constraints." << std::endl;
+
   constraints.reinit(locally_owned_dofs, locally_relevant_dofs);
   DoFTools::make_hanging_node_constraints(dof_handler, constraints);
   constraints_OLDSTYLE.copy_from(constraints);
 
-  // make consistent
+
+  pcout << "Make constraints consistent." << std::endl;
+
   constraints.make_consistent_in_parallel(locally_owned_dofs,
                                           locally_active_dofs,
                                           dof_handler.get_communicator());
@@ -125,7 +113,9 @@ Problem<dim, spacedim>::run()
   // constraints.print(std::cout);
   // constraints_OLDSTYLE.print(std::cout);
 
-  // compare differences in constraints
+
+  pcout << "Compare differences in constraints." << std::endl;
+
   for (const auto i : locally_active_dofs)
     {
       Assert(constraints.is_constrained(i) ==
