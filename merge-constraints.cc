@@ -81,7 +81,7 @@ Problem<dim, spacedim>::run()
   GridGenerator::pipe_junction(triangulation, openings, bifurcation);
 
   // load checkpoint
-  triangulation.load("stokes_mg-asm_weights.cycle-07.checkpoint");
+  triangulation.load("critical_hp.cycle-01.checkpoint");
   dof_handler.deserialize_active_fe_indices();
 
   // set dofs
