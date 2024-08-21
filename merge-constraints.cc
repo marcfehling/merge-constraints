@@ -28,6 +28,8 @@
 
 #include <deal.II/lac/affine_constraints.h>
 
+#include <deal.II/numerics/data_out.h>
+
 using namespace dealii;
 
 template <int dim, int spacedim = dim>
@@ -175,6 +177,7 @@ Problem<dim, spacedim>::run()
 
   pcout << "Compare differences in constraints." << std::endl;
 
+  std::set<types::global_dof_index> problematic_dofs;
   for (const auto i : locally_active_dofs)
     {
       Assert(constraints.is_constrained(i) ==
@@ -192,9 +195,45 @@ Problem<dim, spacedim>::run()
             {
               std::cout << "  Problematic entries found for line " << i
                         << std::endl;
+
+              problematic_dofs.insert(i);
             }
         }
     }
+
+
+  pcout << "Write results." << std::endl;
+
+  Vector<float> fe_degrees(triangulation.n_active_cells());
+  for (const auto &cell : dof_handler.active_cell_iterators() |
+                            IteratorFilters::LocallyOwnedCell())
+    fe_degrees(cell->active_cell_index()) = cell->get_fe().degree;
+
+  Vector<float> subdomain(triangulation.n_active_cells());
+  for (auto &subd : subdomain)
+    subd = triangulation.locally_owned_subdomain();
+
+  Vector<float> mask(triangulation.n_active_cells());
+  std::vector<types::global_dof_index> local_dofs;
+  for (const auto &cell : dof_handler.active_cell_iterators() |
+                            IteratorFilters::LocallyOwnedCell())
+    {
+      local_dofs.resize(cell->get_fe().n_dofs_per_cell());
+      cell->get_dof_indices(local_dofs);
+      for (const auto i : local_dofs)
+        if (problematic_dofs.contains(i))
+          mask(cell->active_cell_index()) = i;
+    }
+
+  DataOut<dim, spacedim> data_out;
+
+  data_out.attach_dof_handler(dof_handler);
+  data_out.add_data_vector(fe_degrees, "fe_degrees");
+  data_out.add_data_vector(subdomain, "subdomain");
+  data_out.add_data_vector(mask, "mask");
+  data_out.build_patches();
+
+  data_out.write_vtu_in_parallel("result.vtu", dof_handler.get_communicator());
 }
 
 int

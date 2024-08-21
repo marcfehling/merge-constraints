@@ -6,6 +6,8 @@ set(TARGET_SRC
 
 cmake_minimum_required(VERSION 3.13.4)
 
+set(CMAKE_CXX_STANDARD 20)
+
 find_package(deal.II 9.6.0
   HINTS ${deal.II_DIR} ${DEAL_II_DIR} ../ ../../ $ENV{DEAL_II_DIR}
   )
