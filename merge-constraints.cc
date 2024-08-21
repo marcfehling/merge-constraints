@@ -67,27 +67,86 @@ template <int dim, int spacedim>
 void
 Problem<dim, spacedim>::run()
 {
-  pcout << "Setup grid." << std::endl;
+  pcout << "Set up grid and dofs." << std::endl;
 
-  // coarse mesh
-  // Stokes Y-Pipe geometry
-  const std::vector<std::pair<Point<spacedim>, double>> openings = {
-    {{{-2., 0., 0.}, 1.},
-     {{1., 1. * std::sqrt(3.), 0.}, 1.},
-     {{1., -1. * std::sqrt(3.), 0.}, 1.}}};
+  // set triangulation
+  if (true)
+    {
+      // L-shaped domain as in mg-ev-estimator
 
-  const std::pair<Point<spacedim>, double> bifurcation = {{0., 0., 0.}, 1.};
+      std::vector<unsigned int> repetitions(dim);
+      Point<dim>                bottom_left, top_right;
+      for (unsigned int d = 0; d < dim; ++d)
+        if (d < 2)
+          {
+            repetitions[d] = 2;
+            bottom_left[d] = -1.;
+            top_right[d]   = 1.;
+          }
+        else
+          {
+            repetitions[d] = 1;
+            bottom_left[d] = 0.;
+            top_right[d]   = 1.;
+          }
 
-  GridGenerator::pipe_junction(triangulation, openings, bifurcation);
+      std::vector<int> cells_to_remove(dim, 1);
+      cells_to_remove[0] = -1;
 
-  // load checkpoint
-  triangulation.load("critical_hp.cycle-01.checkpoint");
-  dof_handler.deserialize_active_fe_indices();
+      GridGenerator::subdivided_hyper_L(
+        triangulation, repetitions, bottom_left, top_right, cells_to_remove);
+
+      triangulation.refine_global(2);
+
+      // hp-refine center part
+      for (const auto &cell : dof_handler.active_cell_iterators() |
+                                IteratorFilters::LocallyOwnedCell())
+        {
+          // set all cells to second to last FE
+          cell->set_active_fe_index(1);
+
+          const auto &center = cell->center();
+          if (std::abs(center[0]) < 0.5 && std::abs(center[1]) < 0.5)
+            {
+              if (center[0] < -0.25 || center[1] > 0.25)
+                // outer layer gets p-refined
+                cell->set_active_fe_index(2);
+              else
+                // inner layer gets h-refined
+                cell->set_refine_flag();
+            }
+        }
+
+      triangulation.execute_coarsening_and_refinement();
+    }
+  else if (false)
+    {
+      // Y-pipe domain from hpbox checkpoint
+
+      // coarse mesh
+      const std::vector<std::pair<Point<spacedim>, double>> openings = {
+        {{{-2., 0., 0.}, 1.},
+         {{1., 1. * std::sqrt(3.), 0.}, 1.},
+         {{1., -1. * std::sqrt(3.), 0.}, 1.}}};
+
+      const std::pair<Point<spacedim>, double> bifurcation = {{0., 0., 0.}, 1.};
+
+      GridGenerator::pipe_junction(triangulation, openings, bifurcation);
+
+      // load checkpoint
+      triangulation.load("critical_hp.cycle-01.checkpoint");
+      dof_handler.deserialize_active_fe_indices();
+    }
+
+  pcout << "  Number of cells: " << triangulation.n_global_active_cells()
+        << std::endl;
 
   // set dofs
   for (unsigned int degree = 1; degree <= 10; ++degree)
     fe_collection.push_back(FE_Q<dim>(degree));
   dof_handler.distribute_dofs(fe_collection);
+
+  pcout << "  Number of DoFs:  " << dof_handler.n_dofs() << std::endl;
 
   const IndexSet &locally_owned_dofs = dof_handler.locally_owned_dofs();
   locally_active_dofs   = DoFTools::extract_locally_active_dofs(dof_handler);
@@ -131,7 +190,7 @@ Problem<dim, spacedim>::run()
           // compare entries
           if (*entries != *entries_OLDSTYLE)
             {
-              std::cout << "Problematic entries found for line " << i
+              std::cout << "  Problematic entries found for line " << i
                         << std::endl;
             }
         }
