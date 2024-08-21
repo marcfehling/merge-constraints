@@ -223,18 +223,28 @@ Problem<dim, spacedim>::run()
               {
                 problematic_dofs.insert(i);
 
-                std::cout << "  Problematic entries found for line " << i
-                          << std::endl;
+                std::cout << "  Problematic entries found on process "
+                          << Utilities::MPI::this_mpi_process(
+                               dof_handler.get_communicator())
+                          << " for line " << i << std::endl;
 
                 std::cout << "    Entries NEWSTYLE: " << std::endl;
-                for (auto pair : *entries_NEWSTYLE)
-                  std::cout << "      " << pair.first << " " << pair.second
-                            << std::endl;
+                for (const auto &pair : *entries_NEWSTYLE)
+                  {
+                    problematic_dofs.insert(pair.first);
+
+                    std::cout << "      " << pair.first << " " << pair.second
+                              << std::endl;
+                  }
 
                 std::cout << "    Entries OLDSTYLE: " << std::endl;
-                for (auto pair : *entries_OLDSTYLE)
-                  std::cout << "      " << pair.first << " " << pair.second
-                            << std::endl;
+                for (const auto &pair : *entries_OLDSTYLE)
+                  {
+                    problematic_dofs.insert(pair.first);
+
+                    std::cout << "      " << pair.first << " " << pair.second
+                              << std::endl;
+                  }
               }
           }
       }
