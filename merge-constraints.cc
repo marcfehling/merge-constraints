@@ -51,7 +51,6 @@ private:
   IndexSet locally_relevant_dofs;
 
   AffineConstraints<double> constraints_NEWSTYLE;
-  AffineConstraints<double> constraints_OLDSTYLE;
 
   ConditionalOStream pcout;
 };
@@ -163,7 +162,6 @@ Problem<dim, spacedim>::run()
 
   constraints_NEWSTYLE.reinit(locally_owned_dofs, locally_relevant_dofs);
   DoFTools::make_hanging_node_constraints(dof_handler, constraints_NEWSTYLE);
-  constraints_OLDSTYLE.copy_from(constraints_NEWSTYLE);
 
   {
     std::cout << "  hanging node constraints on process "
@@ -180,75 +178,34 @@ Problem<dim, spacedim>::run()
 
   constraints_NEWSTYLE.make_consistent_in_parallel(
     locally_owned_dofs, locally_active_dofs, dof_handler.get_communicator());
-  constraints_OLDSTYLE.make_consistent_in_parallel_OLDSTYLE(
-    locally_owned_dofs, locally_active_dofs, dof_handler.get_communicator());
 
   {
     // constraints.print(std::cout);
-    // constraints_OLDSTYLE.print(std::cout);
 
     std::cout << "  consistent constraints NEWSTYLE on process "
               << Utilities::MPI::this_mpi_process(
                    dof_handler.get_communicator())
               << ": " << constraints_NEWSTYLE.n_constraints() << std::endl;
-    std::cout << "  consistent constraints OLDSTYLE on process "
-              << Utilities::MPI::this_mpi_process(
-                   dof_handler.get_communicator())
-              << ": " << constraints_OLDSTYLE.n_constraints() << std::endl;
     MPI_Barrier(dof_handler.get_communicator());
   }
-
 
   // --------------------
   pcout << "Compare differences in constraints." << std::endl;
   // --------------------
-
+  // manually specify problematic dofs
   std::set<types::global_dof_index> problematic_dofs;
+
+  // add dofs whose constraint lines differ after calling
+  // both versions of make_consistent_in_parallel
+  problematic_dofs.insert({774, 852});
+  // add dofs to which 774 and 852 are constrained against
+  // in both versions of make_consistent_in_parallel
+  problematic_dofs.insert({209, 627, 773, 627, 667, 851});
+  // add dofs to which 774 and 852 are additionally constrained against
+  // in the NEWSTYLE version of make_consistent_in_parallel
+  problematic_dofs.insert({630, 670});
+
   {
-    for (const auto i : locally_active_dofs)
-      {
-        Assert(constraints_NEWSTYLE.is_constrained(i) ==
-                 constraints_OLDSTYLE.is_constrained(i),
-               ExcInternalError());
-
-        if (constraints_NEWSTYLE.is_constrained(i))
-          {
-            const auto entries_NEWSTYLE =
-              constraints_NEWSTYLE.get_constraint_entries(i);
-            const auto entries_OLDSTYLE =
-              constraints_OLDSTYLE.get_constraint_entries(i);
-
-            // compare entries
-            if (*entries_NEWSTYLE != *entries_OLDSTYLE)
-              {
-                problematic_dofs.insert(i);
-
-                std::cout << "  Problematic entries found on process "
-                          << Utilities::MPI::this_mpi_process(
-                               dof_handler.get_communicator())
-                          << " for line " << i << std::endl;
-
-                std::cout << "    Entries NEWSTYLE: " << std::endl;
-                for (const auto &pair : *entries_NEWSTYLE)
-                  {
-                    problematic_dofs.insert(pair.first);
-
-                    std::cout << "      " << pair.first << " " << pair.second
-                              << std::endl;
-                  }
-
-                std::cout << "    Entries OLDSTYLE: " << std::endl;
-                for (const auto &pair : *entries_OLDSTYLE)
-                  {
-                    problematic_dofs.insert(pair.first);
-
-                    std::cout << "      " << pair.first << " " << pair.second
-                              << std::endl;
-                  }
-              }
-          }
-      }
-
     // merge on all processes
     problematic_dofs =
       Utilities::MPI::compute_set_union(problematic_dofs,

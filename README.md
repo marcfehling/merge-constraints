@@ -6,7 +6,7 @@ Compare the [AffineConstraints::make_consistent_in_parallel()](https://dealii.or
 Setup
 =====
 
-You need to work on this [deal.II branch](https://github.com/marcfehling/dealii/tree/old-and-new-consistency).
+You need to work on the [deal.II master branch](https://github.com/dealii/dealii/tree/master).
 
 Configure this project as an in-source build as follows:
 
