@@ -50,7 +50,7 @@ private:
   IndexSet locally_active_dofs;
   IndexSet locally_relevant_dofs;
 
-  AffineConstraints<double> constraints;
+  AffineConstraints<double> constraints_NEWSTYLE;
   AffineConstraints<double> constraints_OLDSTYLE;
 
   ConditionalOStream pcout;
@@ -69,7 +69,9 @@ template <int dim, int spacedim>
 void
 Problem<dim, spacedim>::run()
 {
+  // --------------------
   pcout << "Set up grid and dofs." << std::endl;
+  // --------------------
 
   // set triangulation
   if (true)
@@ -155,64 +157,94 @@ Problem<dim, spacedim>::run()
   locally_relevant_dofs = DoFTools::extract_locally_relevant_dofs(dof_handler);
 
 
+  // --------------------
   pcout << "Make hanging node constraints." << std::endl;
+  // --------------------
 
-  constraints.reinit(locally_owned_dofs, locally_relevant_dofs);
-  DoFTools::make_hanging_node_constraints(dof_handler, constraints);
-  constraints_OLDSTYLE.copy_from(constraints);
+  constraints_NEWSTYLE.reinit(locally_owned_dofs, locally_relevant_dofs);
+  DoFTools::make_hanging_node_constraints(dof_handler, constraints_NEWSTYLE);
+  constraints_OLDSTYLE.copy_from(constraints_NEWSTYLE);
+
+  {
+    std::cout << "  hanging node constraints on process "
+              << Utilities::MPI::this_mpi_process(
+                   dof_handler.get_communicator())
+              << ": " << constraints_NEWSTYLE.n_constraints() << std::endl;
+    MPI_Barrier(dof_handler.get_communicator());
+  }
 
 
+  // --------------------
   pcout << "Make constraints consistent." << std::endl;
+  // --------------------
 
-  constraints.make_consistent_in_parallel(locally_owned_dofs,
-                                          locally_active_dofs,
-                                          dof_handler.get_communicator());
-
+  constraints_NEWSTYLE.make_consistent_in_parallel(
+    locally_owned_dofs, locally_active_dofs, dof_handler.get_communicator());
   constraints_OLDSTYLE.make_consistent_in_parallel_OLDSTYLE(
     locally_owned_dofs, locally_active_dofs, dof_handler.get_communicator());
 
-  // constraints.print(std::cout);
-  // constraints_OLDSTYLE.print(std::cout);
+  {
+    // constraints.print(std::cout);
+    // constraints_OLDSTYLE.print(std::cout);
+
+    std::cout << "  consistent constraints NEWSTYLE on process "
+              << Utilities::MPI::this_mpi_process(
+                   dof_handler.get_communicator())
+              << ": " << constraints_NEWSTYLE.n_constraints() << std::endl;
+    std::cout << "  consistent constraints OLDSTYLE on process "
+              << Utilities::MPI::this_mpi_process(
+                   dof_handler.get_communicator())
+              << ": " << constraints_OLDSTYLE.n_constraints() << std::endl;
+    MPI_Barrier(dof_handler.get_communicator());
+  }
 
 
+  // --------------------
   pcout << "Compare differences in constraints." << std::endl;
+  // --------------------
 
   std::set<types::global_dof_index> problematic_dofs;
-  for (const auto i : locally_active_dofs)
-    {
-      Assert(constraints.is_constrained(i) ==
-               constraints_OLDSTYLE.is_constrained(i),
-             ExcInternalError());
+  {
+    for (const auto i : locally_active_dofs)
+      {
+        Assert(constraints_NEWSTYLE.is_constrained(i) ==
+                 constraints_OLDSTYLE.is_constrained(i),
+               ExcInternalError());
 
-      if (constraints.is_constrained(i))
-        {
-          const auto entries = constraints.get_constraint_entries(i);
-          const auto entries_OLDSTYLE =
-            constraints_OLDSTYLE.get_constraint_entries(i);
+        if (constraints_NEWSTYLE.is_constrained(i))
+          {
+            const auto entries_NEWSTYLE =
+              constraints_NEWSTYLE.get_constraint_entries(i);
+            const auto entries_OLDSTYLE =
+              constraints_OLDSTYLE.get_constraint_entries(i);
 
-          // compare entries
-          if (*entries != *entries_OLDSTYLE)
-            {
-              problematic_dofs.insert(i);
+            // compare entries
+            if (*entries_NEWSTYLE != *entries_OLDSTYLE)
+              {
+                problematic_dofs.insert(i);
 
-              std::cout << "  Problematic entries found for line " << i
-                        << std::endl;
-
-              std::cout << "    Entries new: " << std::endl;
-              for (auto pair : *entries)
-                std::cout << "      " << pair.first << " " << pair.second
+                std::cout << "  Problematic entries found for line " << i
                           << std::endl;
 
-              std::cout << "    Entries old: " << std::endl;
-              for (auto pair : *entries_OLDSTYLE)
-                std::cout << "      " << pair.first << " " << pair.second
-                          << std::endl;
-            }
-        }
-    }
+                std::cout << "    Entries NEWSTYLE: " << std::endl;
+                for (auto pair : *entries_NEWSTYLE)
+                  std::cout << "      " << pair.first << " " << pair.second
+                            << std::endl;
+
+                std::cout << "    Entries OLDSTYLE: " << std::endl;
+                for (auto pair : *entries_OLDSTYLE)
+                  std::cout << "      " << pair.first << " " << pair.second
+                            << std::endl;
+              }
+          }
+      }
+    MPI_Barrier(dof_handler.get_communicator());
+  }
 
 
+  // --------------------
   pcout << "Write results." << std::endl;
+  // --------------------
 
   Vector<float> fe_degrees(triangulation.n_active_cells());
   for (const auto &cell : dof_handler.active_cell_iterators() |
@@ -223,7 +255,7 @@ Problem<dim, spacedim>::run()
   for (auto &subd : subdomain)
     subd = triangulation.locally_owned_subdomain();
 
-  Vector<float> mask(triangulation.n_active_cells());
+  Vector<float>                        mask(triangulation.n_active_cells());
   std::vector<types::global_dof_index> local_dofs;
   for (const auto &cell : dof_handler.active_cell_iterators() |
                             IteratorFilters::LocallyOwnedCell())
