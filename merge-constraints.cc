@@ -230,9 +230,16 @@ Problem<dim, spacedim>::run()
     {
       local_dofs.resize(cell->get_fe().n_dofs_per_cell());
       cell->get_dof_indices(local_dofs);
-      for (const auto i : local_dofs)
-        if (problematic_dofs.contains(i))
-          mask(cell->active_cell_index()) = i;
+      for (unsigned int i = 0; i < local_dofs.size(); ++i)
+        if (problematic_dofs.contains(local_dofs[i]))
+          {
+            std::cout << "  DoF " << local_dofs[i] << " is the " << i
+                      << "th DoF on cell " << cell->global_active_cell_index()
+                      << " with FE_Q(" << cell->get_fe().degree << ")"
+                      << std::endl;
+
+            mask(cell->active_cell_index()) = local_dofs[i];
+          }
     }
 
   DataOut<dim, spacedim> data_out;
