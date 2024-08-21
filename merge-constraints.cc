@@ -193,10 +193,20 @@ Problem<dim, spacedim>::run()
           // compare entries
           if (*entries != *entries_OLDSTYLE)
             {
+              problematic_dofs.insert(i);
+
               std::cout << "  Problematic entries found for line " << i
                         << std::endl;
 
-              problematic_dofs.insert(i);
+              std::cout << "    Entries new: " << std::endl;
+              for (auto pair : *entries)
+                std::cout << "      " << pair.first << " " << pair.second
+                          << std::endl;
+
+              std::cout << "    Entries old: " << std::endl;
+              for (auto pair : *entries_OLDSTYLE)
+                std::cout << "      " << pair.first << " " << pair.second
+                          << std::endl;
             }
         }
     }

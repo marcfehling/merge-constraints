@@ -12,3 +12,9 @@ Configure this project as an in-source build as follows:
 
     cmake -DDEAL_II_DIR=/path/to/dealii .
     make
+
+To reproduce the assertion, run in debug mode on 3 MPI processes:
+
+    make debug
+    make
+    mpirun -np 3 ./merge-constraints
