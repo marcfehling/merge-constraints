@@ -248,6 +248,12 @@ Problem<dim, spacedim>::run()
               }
           }
       }
+
+    // merge on all processes
+    problematic_dofs =
+      Utilities::MPI::compute_set_union(problematic_dofs,
+                                        dof_handler.get_communicator());
+
     MPI_Barrier(dof_handler.get_communicator());
   }
 
@@ -277,7 +283,10 @@ Problem<dim, spacedim>::run()
           {
             std::cout << "  DoF " << local_dofs[i] << " is the " << i
                       << "th DoF on cell " << cell->global_active_cell_index()
-                      << " with FE_Q(" << cell->get_fe().degree << ")"
+                      << " with FE_Q(" << cell->get_fe().degree
+                      << ") on process "
+                      << Utilities::MPI::this_mpi_process(
+                           dof_handler.get_communicator())
                       << std::endl;
 
             mask(cell->active_cell_index()) = local_dofs[i];
