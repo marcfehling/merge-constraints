@@ -76,6 +76,35 @@ Problem<dim, spacedim>::run()
   // set triangulation
   if (true)
     {
+      std::vector<unsigned int> repetitions({4, 2, 1});
+      Point<dim>                bottom_left(-2, -1, 0);
+      Point<dim>                top_right(2, 1, 1);
+
+      GridGenerator::subdivided_hyper_rectangle(triangulation,
+                                                repetitions,
+                                                bottom_left,
+                                                top_right);
+
+      // hp-refine center part
+      for (const auto &cell : dof_handler.active_cell_iterators() |
+                                IteratorFilters::LocallyOwnedCell())
+        {
+          cell->set_active_fe_index(1);
+
+          const auto &center = cell->center();
+          if (std::abs(center[0]) < 1.)
+            {
+              if (center[1] > 0.)
+                cell->set_active_fe_index(2);
+              else
+                cell->set_refine_flag();
+            }
+        }
+      
+      triangulation.execute_coarsening_and_refinement();
+    }
+  else if (false)
+    {
       // L-shaped domain as in mg-ev-estimator
 
       std::vector<unsigned int> repetitions(dim);
