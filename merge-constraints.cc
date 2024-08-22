@@ -75,6 +75,35 @@ Problem<dim, spacedim>::run()
   // set triangulation
   if (true)
     {
+      std::vector<unsigned int> repetitions({4, 2, 1});
+      Point<dim>                bottom_left(-2, -1, 0);
+      Point<dim>                top_right(2, 1, 1);
+
+      GridGenerator::subdivided_hyper_rectangle(triangulation,
+                                                repetitions,
+                                                bottom_left,
+                                                top_right);
+
+      // hp-refine center part
+      for (const auto &cell : dof_handler.active_cell_iterators() |
+                                IteratorFilters::LocallyOwnedCell())
+        {
+          cell->set_active_fe_index(1);
+
+          const auto &center = cell->center();
+          if (std::abs(center[0]) < 1.)
+            {
+              if (center[1] > 0.)
+                cell->set_active_fe_index(2);
+              else
+                cell->set_refine_flag();
+            }
+        }
+
+      triangulation.execute_coarsening_and_refinement();
+    }
+  else if (false)
+    {
       // L-shaped domain as in mg-ev-estimator
 
       std::vector<unsigned int> repetitions(dim);
@@ -197,13 +226,13 @@ Problem<dim, spacedim>::run()
 
   // add dofs whose constraint lines differ after calling
   // both versions of make_consistent_in_parallel
-  problematic_dofs.insert({774, 852});
-  // add dofs to which 774 and 852 are constrained against
+  problematic_dofs.insert({64});
+  // add dofs to which 64 are constrained against
   // in both versions of make_consistent_in_parallel
-  problematic_dofs.insert({209, 627, 773, 627, 667, 851});
+  problematic_dofs.insert({3, 7, 19});
   // add dofs to which 774 and 852 are additionally constrained against
   // in the NEWSTYLE version of make_consistent_in_parallel
-  problematic_dofs.insert({630, 670});
+  problematic_dofs.insert({63});
 
   {
     // merge on all processes
