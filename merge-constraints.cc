@@ -13,6 +13,7 @@
 
 #include <deal.II/base/conditional_ostream.h>
 #include <deal.II/base/index_set.h>
+#include <deal.II/base/timer.h>
 
 #include <deal.II/distributed/tria.h>
 
@@ -50,10 +51,10 @@ private:
   IndexSet locally_active_dofs;
   IndexSet locally_relevant_dofs;
 
-  AffineConstraints<double> constraints_NEWSTYLE;
-  AffineConstraints<double> constraints_OLDSTYLE;
+  AffineConstraints<double> constraints;
 
   ConditionalOStream pcout;
+  TimerOutput        timer;
 };
 
 template <int dim, int spacedim>
@@ -63,274 +64,67 @@ Problem<dim, spacedim>::Problem()
   , pcout(std::cout,
           Utilities::MPI::this_mpi_process(triangulation.get_communicator()) ==
             0)
+  , timer(pcout, TimerOutput::never, TimerOutput::wall_times)
 {}
 
 template <int dim, int spacedim>
 void
 Problem<dim, spacedim>::run()
 {
-  // --------------------
+  timer.enter_subsection("run");
+
   pcout << "Set up grid and dofs." << std::endl;
-  // --------------------
+  {
+    TimerOutput::Scope t(timer, "set_up");
+    // Y-pipe domain from hpbox checkpoint
 
-  // set triangulation
-  if (true)
-    {
-      std::vector<unsigned int> repetitions({4, 2, 1});
-      Point<dim>                bottom_left(-2, -1, 0);
-      Point<dim>                top_right(2, 1, 1);
+    // coarse mesh
+    const std::vector<std::pair<Point<spacedim>, double>> openings = {
+      {{{-2., 0., 0.}, 1.},
+       {{1., 1. * std::sqrt(3.), 0.}, 1.},
+       {{1., -1. * std::sqrt(3.), 0.}, 1.}}};
 
-      GridGenerator::subdivided_hyper_rectangle(triangulation,
-                                                repetitions,
-                                                bottom_left,
-                                                top_right);
+    const std::pair<Point<spacedim>, double> bifurcation = {{0., 0., 0.}, 1.};
 
-      // hp-refine center part
-      for (const auto &cell : dof_handler.active_cell_iterators() |
-                                IteratorFilters::LocallyOwnedCell())
-        {
-          cell->set_active_fe_index(1);
+    GridGenerator::pipe_junction(triangulation, openings, bifurcation);
 
-          const auto &center = cell->center();
-          if (std::abs(center[0]) < 1.)
-            {
-              if (center[1] > 0.)
-                cell->set_active_fe_index(2);
-              else
-                cell->set_refine_flag();
-            }
-        }
-      
-      triangulation.execute_coarsening_and_refinement();
-    }
-  else if (false)
-    {
-      // L-shaped domain as in mg-ev-estimator
+    // load checkpoint
+    triangulation.load("critical_hp.cycle-07.checkpoint");
+    dof_handler.deserialize_active_fe_indices();
 
-      std::vector<unsigned int> repetitions(dim);
-      Point<dim>                bottom_left, top_right;
-      for (unsigned int d = 0; d < dim; ++d)
-        if (d < 2)
-          {
-            repetitions[d] = 2;
-            bottom_left[d] = -1.;
-            top_right[d]   = 1.;
-          }
-        else
-          {
-            repetitions[d] = 1;
-            bottom_left[d] = 0.;
-            top_right[d]   = 1.;
-          }
+    pcout << "  Number of cells: " << triangulation.n_global_active_cells()
+          << std::endl;
 
-      std::vector<int> cells_to_remove(dim, 1);
-      cells_to_remove[0] = -1;
-
-      GridGenerator::subdivided_hyper_L(
-        triangulation, repetitions, bottom_left, top_right, cells_to_remove);
-
-      triangulation.refine_global(2);
-
-      // hp-refine center part
-      for (const auto &cell : dof_handler.active_cell_iterators() |
-                                IteratorFilters::LocallyOwnedCell())
-        {
-          // set all cells to second to last FE
-          cell->set_active_fe_index(1);
-
-          const auto &center = cell->center();
-          if (std::abs(center[0]) < 0.5 && std::abs(center[1]) < 0.5)
-            {
-              if (center[0] < -0.25 || center[1] > 0.25)
-                // outer layer gets p-refined
-                cell->set_active_fe_index(2);
-              else
-                // inner layer gets h-refined
-                cell->set_refine_flag();
-            }
-        }
-
-      triangulation.execute_coarsening_and_refinement();
-    }
-  else if (false)
-    {
-      // Y-pipe domain from hpbox checkpoint
-
-      // coarse mesh
-      const std::vector<std::pair<Point<spacedim>, double>> openings = {
-        {{{-2., 0., 0.}, 1.},
-         {{1., 1. * std::sqrt(3.), 0.}, 1.},
-         {{1., -1. * std::sqrt(3.), 0.}, 1.}}};
-
-      const std::pair<Point<spacedim>, double> bifurcation = {{0., 0., 0.}, 1.};
-
-      GridGenerator::pipe_junction(triangulation, openings, bifurcation);
-
-      // load checkpoint
-      triangulation.load("critical_hp.cycle-01.checkpoint");
-      dof_handler.deserialize_active_fe_indices();
-    }
-
-  pcout << "  Number of cells: " << triangulation.n_global_active_cells()
-        << std::endl;
-
-  // set dofs
-  for (unsigned int degree = 1; degree <= 10; ++degree)
-    fe_collection.push_back(FE_Q<dim>(degree));
-  dof_handler.distribute_dofs(fe_collection);
-
-  pcout << "  Number of DoFs:  " << dof_handler.n_dofs() << std::endl;
+    // set dofs
+    for (unsigned int degree = 1; degree <= 10; ++degree)
+      fe_collection.push_back(FE_Q<dim>(degree));
+    dof_handler.distribute_dofs(fe_collection);
+    pcout << "  Number of DoFs:  " << dof_handler.n_dofs() << std::endl;
+  }
 
   const IndexSet &locally_owned_dofs = dof_handler.locally_owned_dofs();
   locally_active_dofs   = DoFTools::extract_locally_active_dofs(dof_handler);
   locally_relevant_dofs = DoFTools::extract_locally_relevant_dofs(dof_handler);
 
 
-  // --------------------
   pcout << "Make hanging node constraints." << std::endl;
-  // --------------------
-
-  constraints_NEWSTYLE.reinit(locally_owned_dofs, locally_relevant_dofs);
-  DoFTools::make_hanging_node_constraints(dof_handler, constraints_NEWSTYLE);
-  constraints_OLDSTYLE.copy_from(constraints_NEWSTYLE);
-
+  constraints.reinit(locally_owned_dofs, locally_relevant_dofs);
   {
-    std::cout << "  hanging node constraints on process "
-              << Utilities::MPI::this_mpi_process(
-                   dof_handler.get_communicator())
-              << ": " << constraints_NEWSTYLE.n_constraints() << std::endl;
-    MPI_Barrier(dof_handler.get_communicator());
+    TimerOutput::Scope t(timer, "make_hanging_node_constraints");
+    DoFTools::make_hanging_node_constraints(dof_handler, constraints);
   }
 
 
-  // --------------------
   pcout << "Make constraints consistent." << std::endl;
-  // --------------------
+  constraints.make_consistent_in_parallel(locally_owned_dofs,
+                                          locally_active_dofs,
+                                          dof_handler.get_communicator(),
+                                          timer);
 
-  constraints_NEWSTYLE.make_consistent_in_parallel(
-    locally_owned_dofs, locally_active_dofs, dof_handler.get_communicator());
-  constraints_OLDSTYLE.make_consistent_in_parallel_OLDSTYLE(
-    locally_owned_dofs, locally_active_dofs, dof_handler.get_communicator());
+  timer.leave_subsection();
 
-  {
-    // constraints.print(std::cout);
-    // constraints_OLDSTYLE.print(std::cout);
-
-    std::cout << "  consistent constraints NEWSTYLE on process "
-              << Utilities::MPI::this_mpi_process(
-                   dof_handler.get_communicator())
-              << ": " << constraints_NEWSTYLE.n_constraints() << std::endl;
-    std::cout << "  consistent constraints OLDSTYLE on process "
-              << Utilities::MPI::this_mpi_process(
-                   dof_handler.get_communicator())
-              << ": " << constraints_OLDSTYLE.n_constraints() << std::endl;
-    MPI_Barrier(dof_handler.get_communicator());
-  }
-
-
-  // --------------------
-  pcout << "Compare differences in constraints." << std::endl;
-  // --------------------
-
-  std::set<types::global_dof_index> problematic_dofs;
-  {
-    for (const auto i : locally_active_dofs)
-      {
-        Assert(constraints_NEWSTYLE.is_constrained(i) ==
-                 constraints_OLDSTYLE.is_constrained(i),
-               ExcInternalError());
-
-        if (constraints_NEWSTYLE.is_constrained(i))
-          {
-            const auto entries_NEWSTYLE =
-              constraints_NEWSTYLE.get_constraint_entries(i);
-            const auto entries_OLDSTYLE =
-              constraints_OLDSTYLE.get_constraint_entries(i);
-
-            // compare entries
-            if (*entries_NEWSTYLE != *entries_OLDSTYLE)
-              {
-                problematic_dofs.insert(i);
-
-                std::cout << "  Problematic entries found on process "
-                          << Utilities::MPI::this_mpi_process(
-                               dof_handler.get_communicator())
-                          << " for line " << i << std::endl;
-
-                std::cout << "    Entries NEWSTYLE: " << std::endl;
-                for (const auto &pair : *entries_NEWSTYLE)
-                  {
-                    problematic_dofs.insert(pair.first);
-
-                    std::cout << "      " << pair.first << " " << pair.second
-                              << std::endl;
-                  }
-
-                std::cout << "    Entries OLDSTYLE: " << std::endl;
-                for (const auto &pair : *entries_OLDSTYLE)
-                  {
-                    problematic_dofs.insert(pair.first);
-
-                    std::cout << "      " << pair.first << " " << pair.second
-                              << std::endl;
-                  }
-              }
-          }
-      }
-
-    // merge on all processes
-    problematic_dofs =
-      Utilities::MPI::compute_set_union(problematic_dofs,
-                                        dof_handler.get_communicator());
-
-    MPI_Barrier(dof_handler.get_communicator());
-  }
-
-
-  // --------------------
-  pcout << "Write results." << std::endl;
-  // --------------------
-
-  Vector<float> fe_degrees(triangulation.n_active_cells());
-  for (const auto &cell : dof_handler.active_cell_iterators() |
-                            IteratorFilters::LocallyOwnedCell())
-    fe_degrees(cell->active_cell_index()) = cell->get_fe().degree;
-
-  Vector<float> subdomain(triangulation.n_active_cells());
-  for (auto &subd : subdomain)
-    subd = triangulation.locally_owned_subdomain();
-
-  Vector<float>                        mask(triangulation.n_active_cells());
-  std::vector<types::global_dof_index> local_dofs;
-  for (const auto &cell : dof_handler.active_cell_iterators() |
-                            IteratorFilters::LocallyOwnedCell())
-    {
-      local_dofs.resize(cell->get_fe().n_dofs_per_cell());
-      cell->get_dof_indices(local_dofs);
-      for (unsigned int i = 0; i < local_dofs.size(); ++i)
-        if (problematic_dofs.contains(local_dofs[i]))
-          {
-            std::cout << "  DoF " << local_dofs[i] << " is the " << i
-                      << "th DoF on cell " << cell->global_active_cell_index()
-                      << " with FE_Q(" << cell->get_fe().degree
-                      << ") on process "
-                      << Utilities::MPI::this_mpi_process(
-                           dof_handler.get_communicator())
-                      << std::endl;
-
-            mask(cell->active_cell_index()) = local_dofs[i];
-          }
-    }
-
-  DataOut<dim, spacedim> data_out;
-
-  data_out.attach_dof_handler(dof_handler);
-  data_out.add_data_vector(fe_degrees, "fe_degrees");
-  data_out.add_data_vector(subdomain, "subdomain");
-  data_out.add_data_vector(mask, "mask");
-  data_out.build_patches();
-
-  data_out.write_vtu_in_parallel("result.vtu", dof_handler.get_communicator());
+  // print timing results
+  timer.print_wall_time_statistics(dof_handler.get_communicator());
 }
 
 int
